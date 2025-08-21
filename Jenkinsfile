@@ -21,9 +21,9 @@ pipeline {
 
     // === Staging ===
     SSH_CRED     = 'staging_ssh'            // <-- credencial SSH para tu servidor
-    STAGING_USER = 'TU_USUARIO'             // <-- CAMBIAR
-    STAGING_HOST = 'TU_HOST_O_IP'           // <-- CAMBIAR
-    STAGING_DIR  = '/home/TU_USUARIO/staging' // <-- CAMBIAR
+    STAGING_USER = 'deploy'             // <-- CAMBIAR
+    STAGING_HOST = 'localhost'           // <-- CAMBIAR
+    STAGING_DIR  = '/home/deploy/staging' // <-- CAMBIAR
     STAGING_PORT = '8081'
 
     HEALTH_URL = "http://${STAGING_HOST}:${STAGING_PORT}/health"
