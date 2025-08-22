@@ -25,6 +25,7 @@ pipeline {
     STAGING_HOST = '172.22.228.104'          // ⚠️ si Jenkins está en Docker, usar host.docker.internal o la IP de WSL
     STAGING_DIR  = '/home/deploy/staging'
     STAGING_PORT = '8081'
+    SSH_PORT     = '22'
 
     HEALTH_URL = "http://${STAGING_HOST}:${STAGING_PORT}/health"
   }
