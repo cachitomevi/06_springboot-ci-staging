@@ -7,7 +7,7 @@ pipeline {
   }
 
   tools {
-    jdk   'jdk11'   // Spring Boot 2.7.x + java.version=11
+    jdk   'jdk11'
     maven 'maven3'
   }
 
@@ -19,13 +19,13 @@ pipeline {
     // === Artefacto ===
     ARTIFACT_NAME = 'demo-0.0.1-SNAPSHOT.jar'
 
-    // === Staging ===
+    // === Staging (WSL) ===
     SSH_CRED     = 'staging_ssh'
     STAGING_USER = 'deploy'
-    STAGING_HOST = '172.22.228.104'          // ⚠️ si Jenkins está en Docker, usar host.docker.internal o la IP de WSL
+    STAGING_HOST = '172.22.228.104'      // <-- tu IP WSL
+    SSH_PORT     = '22'                  // <-- SSH en WSL
     STAGING_DIR  = '/home/deploy/staging'
     STAGING_PORT = '8081'
-    SSH_PORT     = '22'
 
     HEALTH_URL = "http://${STAGING_HOST}:${STAGING_PORT}/health"
   }
@@ -70,13 +70,12 @@ pipeline {
       }
     }
 
-    // ======= Deploy SIN plugin "SSH Agent" =======
     stage('Deploy to Staging (SSH)') {
-  steps {
-    withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CRED,
-                                       keyFileVariable: 'SSH_KEY',
-                                       usernameVariable: 'SSH_USER')]) {
-      sh '''#!/usr/bin/env bash
+      steps {
+        withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CRED,
+                                           keyFileVariable: 'SSH_KEY',
+                                           usernameVariable: 'SSH_USER')]) {
+          sh '''#!/usr/bin/env bash
 set -euo pipefail
 
 # 1) Prepara carpeta remota
@@ -102,27 +101,27 @@ ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" -p "${SSH_PORT}" \
   echo "Nuevo PID: $(cat app.pid)"
 '
 '''
+        }
+      }
     }
-  }
-}
 
     stage('Validate Deployment') {
       steps {
-        sh '''
-          set -e
-          echo "Health check: ${HEALTH_URL}"
-          for i in $(seq 1 20); do
-            if curl -fsS "${HEALTH_URL}" | grep -q "OK"; then
-              echo "Servicio OK en ${HEALTH_URL}"
-              exit 0
-            fi
-            echo "Intento $i/20... esperando 3s"
-            sleep 3
-          done
-          echo "Health check FAILED"
-          curl -i "${HEALTH_URL}" || true
-          exit 1
-        '''
+        sh '''#!/usr/bin/env bash
+set -e
+echo "Health check: ${HEALTH_URL}"
+for i in $(seq 1 20); do
+  if curl -fsS "${HEALTH_URL}" | grep -q "OK"; then
+    echo "Servicio OK en ${HEALTH_URL}"
+    exit 0
+  fi
+  echo "Intento $i/20... esperando 3s"
+  sleep 3
+done
+echo "Health check FAILED"
+curl -i "${HEALTH_URL}" || true
+exit 1
+'''
       }
     }
   }
