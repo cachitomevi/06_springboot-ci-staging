@@ -80,36 +80,38 @@ set -euo pipefail
 
 # 1) Prepara carpeta remota
 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SSH_KEY" -p "${SSH_PORT}" \
-    "$SSH_USER@${STAGING_HOST}" "mkdir -p ${STAGING_DIR}"
+  "$SSH_USER@${STAGING_HOST}" "mkdir -p ${STAGING_DIR}"
 
 # 2) Sube el jar compilado
 scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SSH_KEY" -P "${SSH_PORT}" \
-    "target/${ARTIFACT_NAME}" "$SSH_USER@${STAGING_HOST}:${STAGING_DIR}/app.jar"
+  "target/${ARTIFACT_NAME}" "$SSH_USER@${STAGING_HOST}:${STAGING_DIR}/app.jar"
 
-# 3) Reinicia la app con PID file (usar comillas dobles para expandir vars locales)
+# 3) Reinicia la app en remoto (sin forzar 'cat' cuando no hay PID)
 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SSH_KEY" -p "${SSH_PORT}" \
-    "$SSH_USER@${STAGING_HOST}" bash -lc "
+  "$SSH_USER@${STAGING_HOST}" bash -lc "
   set -euo pipefail
   cd ${STAGING_DIR}
 
-  if [ -f app.pid ] && kill -0 \$(cat app.pid) 2>/dev/null; then
-    echo 'Deteniendo proceso previo PID='\$(cat app.pid)
-    kill \$(cat app.pid) || true
-    sleep 3
-  fi
-
-  # Limpia PID zombie si existe
-  if [ -f app.pid ] && ! kill -0 \$(cat app.pid) 2>/dev/null; then
-    rm -f app.pid
+  if [ -f app.pid ]; then
+    pid=\$(cat app.pid || true)
+    if [ -n \"\$pid\" ] && kill -0 \"\$pid\" 2>/dev/null; then
+      echo \"Deteniendo proceso previo PID=\$pid\"
+      kill \"\$pid\" || true
+      sleep 3
+    else
+      # PID inválido o proceso ya no existe
+      rm -f app.pid
+    fi
   fi
 
   nohup java -jar app.jar --server.port=${STAGING_PORT} > app.log 2>&1 &
   echo \$! > app.pid
-  echo 'Nuevo PID:' \$(cat app.pid)
+  echo \"Nuevo PID: \$(cat app.pid)\"
 "
 '''
     }
   }
+}
 }
 
 
