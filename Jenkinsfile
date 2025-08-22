@@ -20,10 +20,10 @@ pipeline {
     ARTIFACT_NAME = 'demo-0.0.1-SNAPSHOT.jar'
 
     // === Staging ===
-    SSH_CRED     = 'staging_ssh'            // <-- credencial SSH para tu servidor
-    STAGING_USER = 'deploy'             // <-- CAMBIAR
-    STAGING_HOST = 'localhost'           // <-- CAMBIAR
-    STAGING_DIR  = '/home/deploy/staging' // <-- CAMBIAR
+    SSH_CRED     = 'staging_ssh'
+    STAGING_USER = 'deploy'
+    STAGING_HOST = '172.22.228.104'          // ⚠️ si Jenkins está en Docker, usar host.docker.internal o la IP de WSL
+    STAGING_DIR  = '/home/deploy/staging'
     STAGING_PORT = '8081'
 
     HEALTH_URL = "http://${STAGING_HOST}:${STAGING_PORT}/health"
@@ -33,7 +33,6 @@ pipeline {
 
     stage('Checkout') {
       steps {
-        // Clona por SSH usando la credencial de GitHub
         git branch: "${GIT_BRANCH}",
             url: "${GIT_URL}",
             credentialsId: 'github_ssh_key'
@@ -46,7 +45,7 @@ pipeline {
       }
       post {
         always {
-          junit 'target/surefire-reports/*.xml'
+          junit testResults: 'target/surefire-reports/*.xml', allowEmptyResults: true
           archiveArtifacts artifacts: 'target/site/jacoco/**', allowEmptyArchive: true
         }
       }
@@ -54,7 +53,6 @@ pipeline {
 
     stage('Code Quality (Checkstyle)') {
       steps {
-        // Requiere el plugin de Checkstyle configurado en el POM
         sh 'mvn -B checkstyle:checkstyle'
       }
       post {
@@ -71,21 +69,23 @@ pipeline {
       }
     }
 
+    // ======= Deploy SIN plugin "SSH Agent" =======
     stage('Deploy to Staging (SSH)') {
       steps {
-        // Usa la credencial SSH del servidor de Staging
-        sshagent (credentials: [env.SSH_CRED]) {
+        withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CRED,
+                                           keyFileVariable: 'SSH_KEY',
+                                           usernameVariable: 'SSH_USER')]) {
           sh '''
             set -euo pipefail
 
-            # 1) Asegura carpeta remota
-            ssh -o StrictHostKeyChecking=no ${STAGING_USER}@${STAGING_HOST} "mkdir -p ${STAGING_DIR}"
+            # 1) Prepara carpeta remota
+            ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$SSH_USER"@"${STAGING_HOST}" "mkdir -p ${STAGING_DIR}"
 
             # 2) Sube el jar compilado
-            scp -o StrictHostKeyChecking=no "target/${ARTIFACT_NAME}" ${STAGING_USER}@${STAGING_HOST}:${STAGING_DIR}/app.jar
+            scp -o StrictHostKeyChecking=no -i "$SSH_KEY" "target/${ARTIFACT_NAME}" "$SSH_USER"@"${STAGING_HOST}":"${STAGING_DIR}/app.jar"
 
             # 3) Reinicia la app con PID file
-            ssh -o StrictHostKeyChecking=no ${STAGING_USER}@${STAGING_HOST} bash -lc '
+            ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$SSH_USER"@"${STAGING_HOST}" bash -lc '
               set -euo pipefail
               cd ${STAGING_DIR}
 
