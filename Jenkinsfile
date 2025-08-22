@@ -22,7 +22,7 @@ pipeline {
     // === Staging (WSL) ===
     SSH_CRED     = 'staging_ssh'
     STAGING_USER = 'deploy'
-    STAGING_HOST = '172.22.228.104'   // IP WSL
+    STAGING_HOST = '172.22.228.104'
     SSH_PORT     = '22'
     STAGING_DIR  = '/home/deploy/staging'
     STAGING_PORT = '8081'
@@ -71,34 +71,33 @@ pipeline {
     }
 
     stage('Deploy to Staging (SSH)') {
-  steps {
-    withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CRED,
-                                       keyFileVariable: 'SSH_KEY',
-                                       usernameVariable: 'SSH_USER')]) {
-      sh '''#!/usr/bin/env bash
+      steps {
+        withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CRED,
+                                           keyFileVariable: 'SSH_KEY',
+                                           usernameVariable: 'SSH_USER')]) {
+          sh """#!/usr/bin/env bash
 set -eu
 
 # 1) Prepara carpeta remota
-ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SSH_KEY" -p "${SSH_PORT}" \
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SSH_KEY" -p "${SSH_PORT}" \\
   "$SSH_USER@${STAGING_HOST}" "mkdir -p ${STAGING_DIR}"
 
 # 2) Sube el jar compilado
-scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SSH_KEY" -P "${SSH_PORT}" \
+scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SSH_KEY" -P "${SSH_PORT}" \\
   "target/${ARTIFACT_NAME}" "$SSH_USER@${STAGING_HOST}:${STAGING_DIR}/app.jar"
 
-# 3) Reinicia la app en remoto (heredoc evita escapes locos)
-ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SSH_KEY" -p "${SSH_PORT}" \
-  "$SSH_USER@${STAGING_HOST}" <<'EOSSH'
+# 3) Reinicia la app en remoto (heredoc sin expansión local; pasamos RDIR/RPORT)
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SSH_KEY" -p "${SSH_PORT}" \\
+  "$SSH_USER@${STAGING_HOST}" \\
+  RDIR='${STAGING_DIR}' RPORT='${STAGING_PORT}' bash -s <<'EOSSH'
 set -eu
-cd '"${STAGING_DIR}"'
+cd "$RDIR"
 
 pid=""
-# si existe y no está vacío, léelo
 if [ -s app.pid ]; then
   pid=$(cat app.pid 2>/dev/null || echo "")
 fi
 
-# si el PID existe y está vivo, mátalo; si no, limpia el pidfile
 if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
   echo "Deteniendo proceso previo PID=$pid"
   kill "$pid" || true
@@ -107,31 +106,31 @@ else
   rm -f app.pid || true
 fi
 
-# levanta en 0.0.0.0 para permitir acceso externo
-nohup java -jar app.jar --server.port='"${STAGING_PORT}"' --server.address=0.0.0.0 > app.log 2>&1 &
+nohup java -jar app.jar --server.port="$RPORT" --server.address=0.0.0.0 > app.log 2>&1 &
 echo $! > app.pid
 echo "Nuevo PID: $(cat app.pid)"
 EOSSH
-'''
+"""
+        }
+      }
     }
-  }
-}
 
-stage('Validate Deployment') {
-  steps {
-    withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CRED,
-                                       keyFileVariable: 'SSH_KEY',
-                                       usernameVariable: 'SSH_USER')]) {
-      sh '''#!/usr/bin/env bash
+    stage('Validate Deployment') {
+      steps {
+        withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CRED,
+                                           keyFileVariable: 'SSH_KEY',
+                                           usernameVariable: 'SSH_USER')]) {
+          sh """#!/usr/bin/env bash
 set -eu
 echo "Health check remoto en WSL: ${HEALTH_URL}"
 
-ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SSH_KEY" -p "${SSH_PORT}" \
-  "$SSH_USER@${STAGING_HOST}" <<'EOSSH'
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SSH_KEY" -p "${SSH_PORT}" \\
+  "$SSH_USER@${STAGING_HOST}" \\
+  RDIR='${STAGING_DIR}' RPORT='${STAGING_PORT}' bash -s <<'EOSSH'
 set -eu
 for i in $(seq 1 20); do
-  if curl -fsS "http://127.0.0.1:'"${STAGING_PORT}"'/health" | grep -q "OK"; then
-    echo "Servicio OK en 127.0.0.1:'"${STAGING_PORT}"'/health"
+  if curl -fsS "http://127.0.0.1:${RPORT}/health" | grep -q "OK"; then
+    echo "Servicio OK en 127.0.0.1:${RPORT}/health"
     exit 0
   fi
   echo "Intento $i/20... esperando 3s"
@@ -139,14 +138,15 @@ for i in $(seq 1 20); do
 done
 echo "Health check FAILED"
 echo "---- Tail de app.log ----"
-tail -n 200 '"${STAGING_DIR}"'/app.log || true
+tail -n 200 "$RDIR/app.log" || true
 exit 1
 EOSSH
-'''
+"""
+        }
+      }
     }
-  }
-}
 
+  } // <-- cierre de stages
 
   post {
     success {
@@ -160,4 +160,5 @@ EOSSH
                        allowEmptyArchive: true
     }
   }
-}
+
+} // <-- cierre de pipeline
