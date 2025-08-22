@@ -72,38 +72,39 @@ pipeline {
 
     // ======= Deploy SIN plugin "SSH Agent" =======
     stage('Deploy to Staging (SSH)') {
-      steps {
-        withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CRED,
-                                           keyFileVariable: 'SSH_KEY',
-                                           usernameVariable: 'SSH_USER')]) {
-          sh '''
-            set -euo pipefail
+  steps {
+    withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CRED,
+                                       keyFileVariable: 'SSH_KEY',
+                                       usernameVariable: 'SSH_USER')]) {
+      sh '''#!/usr/bin/env bash
+set -euo pipefail
 
-            # 1) Prepara carpeta remota
-            ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$SSH_USER"@"${STAGING_HOST}" "mkdir -p ${STAGING_DIR}"
+# 1) Prepara carpeta remota
+ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" -p "${SSH_PORT}" \
+    "$SSH_USER@${STAGING_HOST}" "mkdir -p ${STAGING_DIR}"
 
-            # 2) Sube el jar compilado
-            scp -o StrictHostKeyChecking=no -i "$SSH_KEY" "target/${ARTIFACT_NAME}" "$SSH_USER"@"${STAGING_HOST}":"${STAGING_DIR}/app.jar"
+# 2) Sube el jar compilado
+scp -o StrictHostKeyChecking=no -i "$SSH_KEY" -P "${SSH_PORT}" \
+    "target/${ARTIFACT_NAME}" "$SSH_USER@${STAGING_HOST}:${STAGING_DIR}/app.jar"
 
-            # 3) Reinicia la app con PID file
-            ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$SSH_USER"@"${STAGING_HOST}" bash -lc '
-              set -euo pipefail
-              cd ${STAGING_DIR}
-
-              if [ -f app.pid ] && kill -0 $(cat app.pid) 2>/dev/null; then
-                echo "Deteniendo proceso previo PID=$(cat app.pid)"
-                kill $(cat app.pid) || true
-                sleep 3
-              fi
-
-              nohup java -jar app.jar --server.port=${STAGING_PORT} > app.log 2>&1 &
-              echo $! > app.pid
-              echo "Nuevo PID: $(cat app.pid)"
-            '
-          '''
-        }
-      }
+# 3) Reinicia la app con PID file
+ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" -p "${SSH_PORT}" \
+    "$SSH_USER@${STAGING_HOST}" bash -lc '
+  set -euo pipefail
+  cd ${STAGING_DIR}
+  if [ -f app.pid ] && kill -0 $(cat app.pid) 2>/dev/null; then
+    echo "Deteniendo proceso previo PID=$(cat app.pid)"
+    kill $(cat app.pid) || true
+    sleep 3
+  fi
+  nohup java -jar app.jar --server.port=${STAGING_PORT} > app.log 2>&1 &
+  echo $! > app.pid
+  echo "Nuevo PID: $(cat app.pid)"
+'
+'''
     }
+  }
+}
 
     stage('Validate Deployment') {
       steps {
