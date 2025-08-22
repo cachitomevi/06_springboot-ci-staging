@@ -71,25 +71,25 @@ pipeline {
     }
 
     stage('Deploy to Staging (SSH)') {
-      steps {
-        withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CRED,
-                                           keyFileVariable: 'SSH_KEY',
-                                           usernameVariable: 'SSH_USER')]) {
-          sh """#!/usr/bin/env bash
+  steps {
+    withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CRED,
+                                       keyFileVariable: 'SSH_KEY',
+                                       usernameVariable: 'SSH_USER')]) {
+      sh '''#!/usr/bin/env bash
 set -eu
 
 # 1) Prepara carpeta remota
-ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SSH_KEY" -p "${SSH_PORT}" \\
-  "$SSH_USER@${STAGING_HOST}" "mkdir -p ${STAGING_DIR}"
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SSH_KEY" -p "$SSH_PORT" \
+  "$SSH_USER@$STAGING_HOST" "mkdir -p $STAGING_DIR"
 
 # 2) Sube el jar compilado
-scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SSH_KEY" -P "${SSH_PORT}" \\
-  "target/${ARTIFACT_NAME}" "$SSH_USER@${STAGING_HOST}:${STAGING_DIR}/app.jar"
+scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SSH_KEY" -P "$SSH_PORT" \
+  "target/$ARTIFACT_NAME" "$SSH_USER@$STAGING_HOST:$STAGING_DIR/app.jar"
 
-# 3) Reinicia la app en remoto (heredoc sin expansión local; pasamos RDIR/RPORT)
-ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SSH_KEY" -p "${SSH_PORT}" \\
-  "$SSH_USER@${STAGING_HOST}" \\
-  RDIR='${STAGING_DIR}' RPORT='${STAGING_PORT}' bash -s <<'EOSSH'
+# 3) Reinicia la app en remoto (pasando vars por env + heredoc sin expansión)
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SSH_KEY" -p "$SSH_PORT" \
+  "$SSH_USER@$STAGING_HOST" \
+  RDIR="$STAGING_DIR" RPORT="$STAGING_PORT" bash -s <<'EOSSH'
 set -eu
 cd "$RDIR"
 
@@ -110,23 +110,24 @@ nohup java -jar app.jar --server.port="$RPORT" --server.address=0.0.0.0 > app.lo
 echo $! > app.pid
 echo "Nuevo PID: $(cat app.pid)"
 EOSSH
-"""
-        }
-      }
+'''
     }
+  }
+}
+
 
     stage('Validate Deployment') {
-      steps {
-        withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CRED,
-                                           keyFileVariable: 'SSH_KEY',
-                                           usernameVariable: 'SSH_USER')]) {
-          sh """#!/usr/bin/env bash
+  steps {
+    withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CRED,
+                                       keyFileVariable: 'SSH_KEY',
+                                       usernameVariable: 'SSH_USER')]) {
+      sh '''#!/usr/bin/env bash
 set -eu
-echo "Health check remoto en WSL: ${HEALTH_URL}"
+echo "Health check remoto en WSL: http://$STAGING_HOST:$STAGING_PORT/health"
 
-ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SSH_KEY" -p "${SSH_PORT}" \\
-  "$SSH_USER@${STAGING_HOST}" \\
-  RDIR='${STAGING_DIR}' RPORT='${STAGING_PORT}' bash -s <<'EOSSH'
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SSH_KEY" -p "$SSH_PORT" \
+  "$SSH_USER@$STAGING_HOST" \
+  RDIR="$STAGING_DIR" RPORT="$STAGING_PORT" bash -s <<'EOSSH'
 set -eu
 for i in $(seq 1 20); do
   if curl -fsS "http://127.0.0.1:${RPORT}/health" | grep -q "OK"; then
@@ -141,10 +142,11 @@ echo "---- Tail de app.log ----"
 tail -n 200 "$RDIR/app.log" || true
 exit 1
 EOSSH
-"""
-        }
-      }
+'''
     }
+  }
+}
+
 
   } // <-- cierre de stages
 
