@@ -22,8 +22,8 @@ pipeline {
     // === Staging (WSL) ===
     SSH_CRED     = 'staging_ssh'
     STAGING_USER = 'deploy'
-    STAGING_HOST = '172.22.228.104'      // <-- tu IP WSL
-    SSH_PORT     = '22'                  // <-- SSH en WSL
+    STAGING_HOST = '172.22.228.104'   // IP WSL
+    SSH_PORT     = '22'
     STAGING_DIR  = '/home/deploy/staging'
     STAGING_PORT = '8081'
 
@@ -71,12 +71,13 @@ pipeline {
     }
 
     stage('Deploy to Staging (SSH)') {
-  steps {
-    withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CRED,
-                                       keyFileVariable: 'SSH_KEY',
-                                       usernameVariable: 'SSH_USER')]) {
-      sh '''#!/usr/bin/env bash
-set -euo pipefail
+      steps {
+        withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CRED,
+                                           keyFileVariable: 'SSH_KEY',
+                                           usernameVariable: 'SSH_USER')]) {
+          // Nota: usamos 'set -eu' (sin pipefail) para compatibilidad POSIX
+          sh '''#!/usr/bin/env bash
+set -eu
 
 # 1) Prepara carpeta remota
 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SSH_KEY" -p "${SSH_PORT}" \
@@ -86,39 +87,36 @@ ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SSH_KEY" -p
 scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SSH_KEY" -P "${SSH_PORT}" \
   "target/${ARTIFACT_NAME}" "$SSH_USER@${STAGING_HOST}:${STAGING_DIR}/app.jar"
 
-# 3) Reinicia la app en remoto (sin forzar 'cat' cuando no hay PID)
+# 3) Reinicia la app en remoto (manejo seguro de PID)
 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SSH_KEY" -p "${SSH_PORT}" \
   "$SSH_USER@${STAGING_HOST}" bash -lc "
-  set -euo pipefail
+  set -eu
   cd ${STAGING_DIR}
 
   if [ -f app.pid ]; then
-    pid=\$(cat app.pid || true)
-    if [ -n \"\$pid\" ] && kill -0 \"\$pid\" 2>/dev/null; then
-      echo \"Deteniendo proceso previo PID=\$pid\"
-      kill \"\$pid\" || true
+    pid=\\$(cat app.pid || true)
+    if [ -n \\\"\\$pid\\\" ] && kill -0 \\\"\\$pid\\\" 2>/dev/null; then
+      echo \\\"Deteniendo proceso previo PID=\\$pid\\\"
+      kill \\\"\\$pid\\\" || true
       sleep 3
     else
-      # PID inválido o proceso ya no existe
       rm -f app.pid
     fi
   fi
 
   nohup java -jar app.jar --server.port=${STAGING_PORT} > app.log 2>&1 &
-  echo \$! > app.pid
-  echo \"Nuevo PID: \$(cat app.pid)\"
+  echo \\$! > app.pid
+  echo \\\"Nuevo PID: \\$(cat app.pid)\\\"
 "
 '''
+        }
+      }
     }
-  }
-}
-}
-
 
     stage('Validate Deployment') {
       steps {
         sh '''#!/usr/bin/env bash
-set -e
+set -eu
 echo "Health check: ${HEALTH_URL}"
 for i in $(seq 1 20); do
   if curl -fsS "${HEALTH_URL}" | grep -q "OK"; then
@@ -137,8 +135,12 @@ exit 1
   }
 
   post {
-    success { echo '✅ OK: tests, cobertura, checkstyle, package, deploy y health check (8081).' }
-    failure { echo '❌ Falló el pipeline. Revisa el stage en rojo y los logs.' }
+    success {
+      echo '✅ OK: tests, cobertura, checkstyle, package, deploy y health check (8081).'
+    }
+    failure {
+      echo '❌ Falló el pipeline. Revisa el stage en rojo y los logs.'
+    }
     always  {
       archiveArtifacts artifacts: "target/${ARTIFACT_NAME}, target/site/jacoco/**, target/checkstyle-result.xml",
                        allowEmptyArchive: true
