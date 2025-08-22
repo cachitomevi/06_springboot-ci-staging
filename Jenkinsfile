@@ -92,21 +92,26 @@ ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SSH_KEY" -p
   set -eu
   cd ${STAGING_DIR}
 
-  if [ -f app.pid ]; then
-    pid=\$(cat app.pid || true)
-    if [ -n \"\$pid\" ] && kill -0 \"\$pid\" 2>/dev/null; then
-      echo \"Deteniendo proceso previo PID=\$pid\"
-      kill \"\$pid\" || true
-      sleep 3
-    else
-      rm -f app.pid
-    fi
+  pid=\"\"
+  # Si existe y tiene contenido, léelo de forma segura
+  if [ -s app.pid ]; then
+    pid=\$(cat app.pid 2>/dev/null || echo \"\")
+  fi
+
+  if [ -n \"\$pid\" ] && kill -0 \"\$pid\" 2>/dev/null; then
+    echo \"Deteniendo proceso previo PID=\$pid\"
+    kill \"\$pid\" || true
+    sleep 3
+  else
+    # Limpia PID vacío, inexistente o zombie
+    rm -f app.pid || true
   fi
 
   nohup java -jar app.jar --server.port=${STAGING_PORT} --server.address=0.0.0.0 > app.log 2>&1 &
   echo \$! > app.pid
   echo \"Nuevo PID: \$(cat app.pid)\"
 "
+
 '''
         }
       }
