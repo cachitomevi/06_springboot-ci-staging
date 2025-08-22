@@ -64,11 +64,22 @@ pipeline {
     }
 
     stage('Package') {
-      steps {
-        sh 'mvn -B -DskipTests package'
-        archiveArtifacts artifacts: "target/${ARTIFACT_NAME}", fingerprint: true
-      }
-    }
+  steps {
+    sh 'mvn -B -DskipTests package spring-boot:repackage'
+
+    // Verificación rápida de que es un Boot fat-jar
+    sh '''#!/usr/bin/env bash
+set -eu
+unzip -p "target/${ARTIFACT_NAME}" META-INF/MANIFEST.MF | tee target/MANIFEST.MF.txt
+if ! grep -q "Main-Class: org.springframework.boot.loader" target/MANIFEST.MF.txt; then
+  echo "ERROR: el JAR no es ejecutable (falta Main-Class de Spring Boot)."
+  exit 1
+fi
+'''
+    archiveArtifacts artifacts: "target/${ARTIFACT_NAME}", fingerprint: true
+  }
+}
+
 
     stage('Deploy to Staging (SSH)') {
   steps {
