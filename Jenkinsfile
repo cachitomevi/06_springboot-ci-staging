@@ -114,25 +114,38 @@ ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SSH_KEY" -p
     }
 
     stage('Validate Deployment') {
-      steps {
-        sh '''#!/usr/bin/env bash
+  steps {
+    withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CRED,
+                                       keyFileVariable: 'SSH_KEY',
+                                       usernameVariable: 'SSH_USER')]) {
+      sh '''#!/usr/bin/env bash
 set -eu
-echo "Health check: ${HEALTH_URL}"
-for i in $(seq 1 20); do
-  if curl -fsS "${HEALTH_URL}" | grep -q "OK"; then
-    echo "Servicio OK en ${HEALTH_URL}"
-    exit 0
-  fi
-  echo "Intento $i/20... esperando 3s"
-  sleep 3
-done
-echo "Health check FAILED"
-curl -i "${HEALTH_URL}" || true
-exit 1
+
+echo "Health check remoto en WSL: ${HEALTH_URL}"
+
+# Probar 20 veces contra localhost dentro de WSL
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$SSH_KEY" -p "${SSH_PORT}" \
+  "$SSH_USER@${STAGING_HOST}" bash -lc '
+    set -eu
+    echo "Probando salud en localhost: ${HEALTH_URL}"
+    for i in $(seq 1 20); do
+      if curl -fsS "http://127.0.0.1:${STAGING_PORT}/health" | grep -q "OK"; then
+        echo "Servicio OK en 127.0.0.1:${STAGING_PORT}/health"
+        exit 0
+      fi
+      echo "Intento $i/20... esperando 3s"
+      sleep 3
+    done
+    echo "Health check FAILED"
+    echo "---- Tail de app.log ----"
+    tail -n 200 "${STAGING_DIR}/app.log" || true
+    exit 1
+  '
 '''
-      }
     }
   }
+}
+
 
   post {
     success {
